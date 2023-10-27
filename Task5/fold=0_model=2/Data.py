@@ -1,0 +1,107 @@
+from abc import ABC
+import pandas as pd
+import joblib
+import torch
+import random
+from torch_geometric.data import Batch
+from torch_geometric.data import Data
+from torch_geometric.data import Dataset
+
+from DataConfig import *
+
+BIONIC_dict = joblib.load('../Dataset/BIONIC_dict.pkl')
+GRAPH_dict = joblib.load('../Dataset/GRAPH_dict.pkl')
+RMA_dict = joblib.load('../Dataset/RMA_dict_Con.pkl')
+MolGNet_dict = joblib.load('../Dataset/MolGNet_dict.pkl')
+
+GEF = []
+Cells = list(RMA_dict.keys())
+for each in Cells:
+    GEF.append(RMA_dict[each])
+GEF = torch.tensor(GEF, dtype=torch.float32)
+values, indices = torch.sort(GEF, descending=True)
+BNF_dict = dict()
+for i in range(len(Cells)):
+    k = 0
+    feature = torch.tensor([0.0] * 512, dtype=torch.float32)
+    for j in range(gene_add_num):
+        if int(indices[i, j]) in BIONIC_dict:
+            k += 1
+            feature += torch.tensor(BIONIC_dict[int(indices[i, j])], dtype=torch.float32)
+    feature = (feature / k).tolist()
+    BNF_dict[Cells[i]] = feature
+
+
+dataset = pd.read_csv('../Dataset/GDSC_LN_IC50.csv', header=0)
+Cell = [str(_) for _ in list(dataset.iloc[:, 0])]
+# Cell = [_.replace('-', '') for _ in Cell]
+Drug = [str(_) for _ in list(dataset.iloc[:, 1])]
+IC50 = [float(_) for _ in list(dataset.iloc[:, 2])]
+Pair = []
+for i in range(len(Cell)):
+    if Cell[i] in RMA_dict and Drug[i] in GRAPH_dict:
+        Pair.append((Cell[i], Drug[i], IC50[i]))
+
+Cell_ls = sorted(list(set(Cell)))
+random.seed(10)
+random.shuffle(Cell_ls)
+Test_Cell = Cell_ls[: len(Cell_ls) // 6]
+Train_Val_Cell = Cell_ls[len(Cell_ls) // 6:]
+Val_Cell = Train_Val_Cell[fold_num * len(Train_Val_Cell) // 5: (fold_num + 1) * len(Train_Val_Cell) // 5]
+Train_Cell = []
+for each in Train_Val_Cell:
+    if each not in Val_Cell:
+        Train_Cell.append(each)
+Train_Pair = []
+Test_Pair = []
+for each in Pair:
+    if each[0] in Test_Cell:
+        Test_Pair.append(each)
+    elif each[0] in Train_Cell:
+        Train_Pair.append(each)
+
+
+def Zscore(vector):
+    return (vector - torch.mean(vector)) / (torch.std(vector))
+
+
+def getData(pair):
+    Graph = []
+    for each_pair in pair:
+        graph = GRAPH_dict[each_pair[1]]
+        x, edge_index, edge_attr = MolGNet_dict[each_pair[1]], graph.edge_index, graph.edge_attr
+        graph = Data(x=x, edge_index=edge_index, edge_attr=edge_attr,
+                     GEF=Zscore(torch.tensor(RMA_dict[each_pair[0]], dtype=torch.float32)),
+                     BNF=torch.tensor(BNF_dict[each_pair[0]], dtype=torch.float32),
+                     ic50=torch.tensor([each_pair[2]], dtype=torch.float32))
+        Graph.append(graph)
+    return Graph
+
+
+Gtrain = getData(Train_Pair)
+Gtest = getData(Test_Pair)
+
+
+class CollateFn:
+    def __init__(self, follow_batch=None, exclude_keys=None):
+        self.follow_batch = follow_batch
+        self.exclude_keys = exclude_keys
+
+    def __call__(self, batch):
+        pyg_list = [Data(x=g.x, edge_index=g.edge_index, edge_attr=g.edge_attr, ic50=g.ic50) for g in batch]
+        pyg_batch = Batch.from_data_list(pyg_list, self.follow_batch, self.exclude_keys)
+        GeneFt = torch.stack([g.GEF for g in batch])
+        BionicFt = torch.stack([g.BNF for g in batch])
+        return pyg_batch, GeneFt, BionicFt
+
+
+class MyDataSet(Dataset, ABC):
+    def __init__(self, graphs):
+        self._graphs = graphs
+
+    def __getitem__(self, idx):
+        graph = self._graphs[idx]
+        return graph
+
+    def __len__(self):
+        return len(self._graphs)
