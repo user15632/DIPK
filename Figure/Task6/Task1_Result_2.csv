@@ -1,0 +1,7 @@
+group,category,value
+BME,Pearson,0.931
+BME,R2,0.8667
+GME,Pearson,0.9384
+GME,R2,0.8806
+BGME,Pearson,0.9406
+BGME,R2,0.8848

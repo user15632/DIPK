@@ -1,0 +1,5 @@
+group,category,value
+Precily,RMSE,1.4766
+Precily,MSE,2.1804
+BGME,RMSE,1.3132
+BGME,MSE,1.7244
