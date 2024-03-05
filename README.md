@@ -1,4 +1,4 @@
-# Integrating Prior Knowledge for Robust Cancer Drug Response Prediction
+# Improving Drug Response Prediction via Integrating Gene Relationships with Deep Learning
 
 This repository is the official implementation.
 
